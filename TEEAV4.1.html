@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TEEA V3 - Online</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body{margin:0;background:#0f172a;color:white;font-family:Arial}
+.container{max-width:1300px;margin:auto;padding:16px}
+.card{background:#111827;padding:14px;border-radius:14px}
+.controls{display:flex;gap:10px;flex-wrap:wrap}
+input,select{padding:10px;border-radius:8px;background:#1f2937;color:white;border:none}
+button{padding:10px;border:none;border-radius:8px;background:#3b82f6;color:white;cursor:pointer}
+#map{height:420px;margin-top:10px;border-radius:10px}
+#output{margin-top:10px}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+<h2>TEEA V3 (ONLINE)</h2>
+
+<div class="card">
+<div class="controls">
+<input id="mgrs" value="55KDU3433326231"/>
+<select id="soilType">
+<option>URBAN</option>
+<option>SAND</option>
+<option selected>LOAM</option>
+<option>CLAY</option>
+</select>
+
+<button id="go">Analyse</button>
+<button id="useLocation">Local Fix</button>
+<button id="copyReport">Copy</button>
+</div>
+
+<div id="output">Awaiting input...</div>
+<div id="map"></div>
+</div>
+</div>
+
+<!-- ✅ CORRECT LIBRARIES -->
+
+<!-- Leaflet JS (FIXED) -->
+
+
+<!-- MGRS (FIXED CDN) -->
+
+
+
+
+</body>
+</html>
