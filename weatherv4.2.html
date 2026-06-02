@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TEEA V5.1 | BDE Tactical Intelligence Master</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #0f172a; --card: #111827; --muted: #94a3b8; --accent: #3b82f6;
+      --stat: #1e293b; --danger: #ef4444; --warning: #eab308; --success: #22c55e;
+      --black-flag: #000000; --radius: 12px; color-scheme: dark;
+    }
+    body { background: var(--bg); font-family: Inter, system-ui, sans-serif; color: white; margin: 0; padding: 12px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid var(--accent); padding-bottom: 10px; margin-bottom: 12px; }
+    .card { background: var(--card); border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.05); margin-bottom: 12px; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+    input, select, button { padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: var(--stat); color: white; font-weight: 600; }
+    button { background: var(--accent); cursor: pointer; border: none; transition: 0.2s; }
+    button:hover { filter: brightness(1.1); }
+    #map { height: 350px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-top: 12px; background: #1e293b; }
+    .brief-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; margin: 16px 0; }
+    .brief-box { background: rgba(59, 130, 246, 0.05); border-left: 4px solid var(--accent); padding: 15px; font-size: 13px; line-height: 1.5; }
+    .brief-box h3 { margin: 0 0 6px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); }
+    .section-title { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); font-weight: 800; margin: 15px 0 8px 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+    .stat { background: var(--stat); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03); }
+    .label { font-size: 9px; color: var(--muted); margin-bottom: 4px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
+    .value { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+    .badge { padding: 1px 5px; border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase; border: 1px solid transparent; }
+    .bg-red { background: var(--danger); } .bg-yellow { background: var(--warning); color: #451a03; } .bg-green { background: var(--success); }
+    .bg-black { background: var(--black-flag); border-color: rgba(255,255,255,0.3); }
+    .forecast-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .day-col { background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; }
+    .stat-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.02); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div><h1 style="margin:0; font-size:22px;">TEEA V5.1 MASTER</h1><div style="font-size:11px; color:var(--muted)">Brigade Intelligence Asset [Planning Day 0 = Tomorrow]</div></div>
+      <div style="text-align:right;"><button id="copy" style="padding:6px 12px; font-size:10px; display:none;">COPY TACTICAL REPORT</button></div>
+    </div>
+
+    <div class="card">
+      <div class="controls">
+        <input id="mgrs" type="text" value="55KDU3433326231" placeholder="MGRS Grid or Lat, Lon" />
+        <select id="soil">
+          <option value="sand">Terrain: Sand / Hard / Urban</option>
+          <option value="loam" selected>Terrain: Loam / Light Soil</option>
+          <option value="clay">Terrain: Clay / Heavy Soil</option>
+        </select>
+        <button id="go">EXECUTE ANALYSIS</button>
+      </div>
+      <div id="output"><div style="padding:40px; text-align:center; color:var(--muted);">Awaiting objective grid input for 96hr planning intelligence...</div></div>
+      <div id="map"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.js"></script>
+
+  <script>
+    let map, marker, currentReport = "", layers = [];
+    try {
+      map = L.map('map', { attributionControl: false }).setView([-19.33, 146.57], 10);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    } catch(e) { document.getElementById('map').innerHTML = "<div style='padding:20px; text-align:center;'>CDN Blocked. Australian text logic active.</div>"; }
+
+    const getTacticalLight = (iso, offset) => {
+      const d = new Date(iso); d.setMinutes(d.getMinutes() + offset);
+      return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false });
+    };
+
+    function getMoonIllum(date) {
+      const synodic = 29.53058867;
+      const diff = (date - new Date("2000-01-06T18:14:00Z")) / 86400000;
+      const phase = (diff / synodic) % 1;
+      return Math.round(0.5 * (1 - Math.cos(phase * 2 * Math.PI)) * 100);
+    }
+
+    function calculateWBGT(temp, rh) {
+      const e = (rh / 100) * 6.105 * Math.exp((17.27 * temp) / (237.7 + temp));
+      const wbgtC = (0.567 * temp) + (0.393 * e) + 3.94;
+      const wbgtF = (wbgtC * 1.8) + 32;
+      let flag = 'NONE', colorClass = 'bg-green';
+      if (wbgtF >= 90) { flag = 'BLACK'; colorClass = 'bg-black'; }
+      else if (wbgtF >= 88) { flag = 'RED'; colorClass = 'bg-red'; }
+      else if (wbgtF >= 85) { flag = 'YELLOW'; colorClass = 'bg-yellow'; }
+      else if (wbgtF >= 80) { flag = 'GREEN'; colorClass = 'bg-green'; }
+      return { val: wbgtC.toFixed(1), flag, colorClass };
+    }
+
+    async function runAnalysis() {
+      const input = document.getElementById('mgrs').value.trim().toUpperCase();
+      const soil = document.getElementById('soil').value;
+      let lat, lon;
+      try {
+        if (input.includes(',')) [lat, lon] = input.split(',').map(Number);
+        else [lon, lat] = window.mgrs.toPoint(input.replace(/\s/g,''));
+      } catch(e) { alert("Coordinate error."); return; }
+
+      document.getElementById('output').innerHTML = '<div style="padding:20px; text-align:center;">Compiling Tactical Estimates...</div>';
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&past_days=5&forecast_days=5&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant&hourly=relative_humidity_2m,cloud_cover,visibility,surface_pressure,cape&timezone=auto`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const D0 = 6; 
+
+        let forecastHTML = `<div class="forecast-grid">`;
+        const b = {}; 
+
+        const forecastRainArray = data.daily.precipitation_sum.slice(D0, D0+4);
+        const total96Rain = forecastRainArray.reduce((acc,x)=>acc+x,0);
+        const maxRainVal = Math.max(...forecastRainArray);
+        const peakRainDayIdx = forecastRainArray.indexOf(maxRainVal);
+        const peakRainLabel = peakRainDayIdx === 0 ? "Tomorrow (D0)" : `D+${peakRainDayIdx}`;
+
+        for (let i = 0; i < 4; i++) {
+          const idx = D0 + i;
+          const label = i === 0 ? "TOMORROW (D0)" : `D+${i}`;
+          const maxT = data.daily.temperature_2m_max[idx], minT = data.daily.temperature_2m_min[idx];
+          const rain = data.daily.precipitation_sum[idx], prob = data.daily.precipitation_probability_max[idx];
+          const pastRainSum = data.daily.precipitation_sum.slice(idx-5, idx).reduce((acc,x)=>acc+x,0) || 0;
+          const windS = data.daily.wind_speed_10m_max[idx], windG = data.daily.wind_gusts_10m_max[idx];
+          const hStart = idx * 24;
+          const rhSlice = data.hourly.relative_humidity_2m.slice(hStart, hStart+24);
+          const avgRH = rhSlice.reduce((acc,x)=>acc+x,0)/24;
+          const avgC = data.hourly.cloud_cover.slice(hStart, hStart+24).reduce((acc,x)=>acc+x,0)/24;
+          const visSlice = data.hourly.visibility.slice(hStart, hStart+24).filter(v=>v!==null);
+          const avgVisRaw = (visSlice.reduce((acc,x)=>acc+x,0)/visSlice.length) / 1000;
+          const minVisRaw = Math.min(...visSlice) / 1000;
+          const da = Math.round((data.elevation || 0) * 3.28 + (118.8 * (maxT - 15)));
+          const illum = getMoonIllum(new Date(data.daily.sunrise[idx]));
+          const bmnt = getTacticalLight(data.daily.sunrise[idx], -30);
+          const eent = getTacticalLight(data.daily.sunset[idx], 30);
+          const heat = calculateWBGT(maxT, avgRH);
+
+          let mult = soil === 'clay' ? 1.5 : (soil === 'loam' ? 1.2 : 1.0);
+          const satVal = pastRainSum * mult;
+          let track = satVal > 50 ? "RESTRICTED" : "GO"; if(satVal > 70) track = "NO-GO";
+          let wheel = satVal > 30 ? "RESTRICTED" : "GO"; if(satVal > 50) wheel = "NO-GO";
+          let crossoverSunrise = getTacticalLight(data.daily.sunrise[idx], 60);
+          let crossoverSunset = getTacticalLight(data.daily.sunset[idx], 60);
+          let acoustic = windS > 15 ? "MASKING ACTIVE" : (avgC < 30 && windS < 10 ? "INVERSION (AMPLIFIED)" : "NOMINAL");
+
+          if (i === 0) Object.assign(b, {track, wheel, satVal, rain, avgC, da, windG, windS, avgRH, avgVis:avgVisRaw, minVis:minVisRaw, prob, pastRain:pastRainSum, acoustic, illum, crossoverSunrise, crossoverSunset, bmnt, eent, maxT, minT, heat, soil});
+
+          forecastHTML += `
+            <div class="day-col">
+              <div style="font-weight:800; font-size:10px; color:var(--accent); margin-bottom:8px;">${label}</div>
+              <div class="stat-row"><span>Temp Max</span><span>${maxT}°C</span></div>
+              <div class="stat-row"><span>Wind / RH</span><span>${windS.toFixed(0)}km/h / ${Math.round(avgRH)}%</span></div>
+              <div class="stat-row"><span>Precipitation</span><span>${rain.toFixed(1)}mm (${prob}%)</span></div>
+              <div class="stat-row"><span>WBGT Flag</span><span class="badge ${heat.colorClass}">${heat.flag}</span></div>
+              <div class="stat-row"><span>Manoeuvre</span><span class="badge ${track==='GO'?'bg-green':'bg-red'}">${track}</span></div>
+            </div>`;
+        }
+
+        const briefCurrent = `<div class="brief-box"><h3>COMMANDER'S ASSESSMENT (D0)</h3>
+          • <strong>MANOEUVRE:</strong> Wheeled combat mobility (Bushmaster) is assessed as <strong>${b.wheel}</strong>. The cumulative moisture sum of ${b.pastRain.toFixed(1)}mm on ${b.soil} terrain ${b.satVal > 30 ? 'has exceeded the 30mm stability threshold' : 'remains below bearing thresholds'}, meaning mechanised manoeuvre is ${b.wheel === 'GO' ? 'unrestricted' : 'likely restricted to formed roads'}. Any attempt to push B-Vehicle logistics into hide positions is currently ${b.satVal > 30 ? 'high risk' : 'optimal'}.<br>
+          • <strong>AVIATION:</strong> CH-47 Chinook lift margins are <strong>${b.da > 3000 ? 'CAUTION' : 'GO'}</strong>. Density Altitude has peaked at ${b.da}ft, which ${b.da > 3000 ? 'surpasses the power baseline for heavy lift' : 'maintaining nominal power margins'}, necessitating ${b.da > 3000 ? 'strict payload management for air-land tasks' : 'no air-mobility restrictions'}. Shadow/Integrator optics remain <strong>${b.avgC > 60 ? 'BLINDED' : 'GO'}</strong> by persistent low-altitude moisture attenuation.<br>
+          • <strong>FIRES:</strong> Artillery support is <strong>${b.wheel === 'GO' ? 'OPTIMAL' : 'RESTRICTED'}</strong>. Towed M777 platforms are assessed as likely tethered to formed roads to prevent soil displacement failures, while tracked AS9 Huntsman units maintain high off-road survivability.</div>`;
+
+        const sustainmentLogic = total96Rain < 10 && b.satVal < 20 ? 
+          `Environmental conditions remain stable across the planning horizon with negligible moisture-driven friction. Dry soil across the forecast period permits high-tempo logistics and off-road resupply without risk of bogging.` : 
+          `Manoeuvre friction is expected to increase following the forecasted arrival of ${maxRainVal.toFixed(1)}mm rain on ${peakRainLabel}. Commanders must prioritise road-bound security and front-load resupply before soil saturation triggers unsealed route failure.`;
+
+        const briefOutlook = `<div class="brief-box"><h3>COMMANDER'S ASSESSMENT (96HR OUTLOOK)</h3>
+          • <strong>SUSTAINMENT:</strong> ${sustainmentLogic}<br>
+          • <strong>FORCE HEALTH:</strong> Peak daylight conditions present a <strong>${b.heat.flag} FLAG</strong> condition. Sustained high relative humidity will induce rapid dismounted fatigue during heavy physical tasks; it is recommended to synchronise mechanical breach or trench clearance activities with the cooler BMNT window.</div>`;
+
+        const briefIntel = `<div class="brief-box"><h3>INTELLIGENCE ASSESSMENT</h3>
+          • <strong>THREAT ADVANTAGE:</strong> The Olvanan vanguard maintains a <strong>SPATIAL BYPASS ADVANTAGE</strong> regardless of soil state. Their ZBD-05 and ZTD-05 assets utilize mechanical hydroplanes to traverse the waterways and marshes that would canalise our heavy M1A2 armour. Defensive screens must be positioned to monitor amphibious avenues of approach.<br>
+          • <strong>WINDOWS:</strong> Sustained surface winds provide <strong>Acoustic Masking</strong> to hide the squadron's mechanical approach noise. The predicted <strong>Thermal Crossover</strong> window at ${b.crossoverSunrise}/${b.crossoverSunset} will momentarily degrade threat LWIR standoff, offering a high-payoff opportunity to mask the initial breach.</div>`;
+
+        document.getElementById('output').innerHTML = `
+          <div class="brief-container">${briefCurrent}${briefOutlook}${briefIntel}</div>
+          
+          <div class="section-title">Current Environmental Conditions (Planning D0)</div>
+          <div class="grid">
+            <div class="stat"><div class="label">Temperature (Min/Max)</div><div class="value">${b.minT} / ${b.maxT}°C</div></div>
+            <div class="stat"><div class="label">Wind / Gusts</div><div class="value">${b.windS.toFixed(0)} / ${b.windG.toFixed(0)} km/h</div></div>
+            <div class="stat"><div class="label">Visibility (Avg)</div><div class="value">${b.avgVis > 10 ? '10km+' : b.avgVis.toFixed(1) + ' km'}</div></div>
+            <div class="stat"><div class="label">WBGT (Max)</div><div class="value">${b.heat.val}°C <span class="badge ${b.heat.colorClass}" style="margin-left:5px">${b.heat.flag}</span></div></div>
+            <div class="stat"><div class="label">BMNT / EENT</div><div class="value">${b.bmnt} / ${b.eent}</div></div>
+            <div class="stat"><div class="label">Relative Humidity</div><div class="value">${Math.round(b.avgRH)}%</div></div>
+            <div class="stat"><div class="label">Precipitation</div><div class="value">${b.rain.toFixed(1)} mm (${b.prob}%)</div></div>
+            <div class="stat"><div class="label">Density Altitude</div><div class="value">${b.da} ft</div></div>
+          </div>
+
+          <div class="section-title">Detailed Platform Analysis (D0)</div>
+          <div class="grid">
+            <div class="stat"><div class="label">Tracked (M1A2 SEPv3)</div><div class="value"><span class="badge ${b.track==='GO'?'bg-green':'bg-red'}">${b.track}</span></div></div>
+            <div class="stat"><div class="label">Wheeled (Bushmaster)</div><div class="value"><span class="badge ${b.wheel==='GO'?'bg-green':'bg-red'}">${b.wheel}</span></div></div>
+            <div class="stat"><div class="label">CH-47 Chinook</div><div class="value"><span class="badge ${b.da>3000?'bg-yellow':'bg-green'}">${b.da>3000?'REDUCED LIFT':'NOMINAL'}</span></div></div>
+            <div class="stat"><div class="label">AH-64E Apache</div><div class="value"><span class="badge ${b.avgRH>85?'bg-yellow':'bg-green'}">${b.avgRH>85?'SENSOR ATTENUATION':'GO'}</span></div></div>
+            <div class="stat"><div class="label">Olvanan Vanguard</div><div class="value"><span class="badge ${b.track==='GO'?'bg-green':'bg-red'}">${b.track==='GO'?'AMPHIB ADVANTAGE':'RESTRICTED'}</span></div></div>
+          </div>
+          <div class="section-title">96-Hour Detailed Planning Statistics</div>
+          ${forecastHTML}</div>`;
+
+        if (map) { map.setView([lat, lon], 12); layers.forEach(l => map.removeLayer(l)); layers = [];
+          const m = L.marker([lat, lon]).addTo(map).bindPopup("OBJ: " + input).openPopup(); layers.push(m);
+          layers.push(L.circle([lat, lon], { radius: Math.min(b.minVis, 10) * 1000, color: 'var(--accent)', fillOpacity: 0.1 }).addTo(map));
+        }
+        currentReport = `TACTICAL REPORT | OBJ: ${input}\n1. BMNT/EENT: ${b.bmnt}/${b.eent}\n2. MANOEUVRE: Tracked ${b.track}, Wheeled ${b.wheel}, WBGT ${b.heat.flag}\n3. INTEL: Olvanan spatial bypass active. Peak rain ${maxRainVal.toFixed(1)}mm on ${peakRainLabel}.`;
+        document.getElementById('copy').style.display = 'block';
+
+      } catch(err) { document.getElementById('output').innerHTML = `<div class="bg-red" style="padding:10px;">ANALYSIS ERROR. Check API response.</div>`; }
+    }
+
+    document.getElementById('go').onclick = runAnalysis;
+    document.getElementById('copy').onclick = async () => {
+      await navigator.clipboard.writeText(currentReport);
+      const btn = document.getElementById('copy'); btn.innerText = "COPIED!"; btn.style.background = "var(--success)";
+      setTimeout(() => { btn.innerText = "COPY TACTICAL REPORT"; btn.style.background = "var(--accent)"; }, 2000);
+    };
+  </script>
+</body>
+</html>
